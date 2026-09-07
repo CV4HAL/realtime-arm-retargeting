@@ -78,9 +78,9 @@ Research team, FrED Factory - Tec de Monterrey:
 - Katherine Lucia MacLean - PM
 - Santiago Burgueño Ortega
 - Carlos Fabián Maldonado Mariño
-- Eduardo Mateo Murillic
+- Eduardo Mateo Murillio Andrade
 - Jasiel Aldana Palacios
-- Rodrigo Flores Manriquez
+- Rodrigo Flores Manríquez
 - Armando Javier Flores Salazar
 
 ## License
