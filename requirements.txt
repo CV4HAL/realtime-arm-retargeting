@@ -1,0 +1,7 @@
+# CV4HAL - realtime-arm-retargeting
+# Requires Python 3.11 (MediaPipe does not support 3.13 yet)
+# Install with:  pip install -r requirements.txt
+
+mediapipe==0.10.14
+opencv-python==4.10.0.84
+numpy<2.0
