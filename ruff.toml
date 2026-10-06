@@ -1,0 +1,5 @@
+target-version = "py311"
+
+[lint]
+# Real errors only (syntax errors, undefined names, unused imports)
+select = ["E9", "F"]
