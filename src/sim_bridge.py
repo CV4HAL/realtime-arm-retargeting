@@ -1,0 +1,265 @@
+import argparse
+import threading
+import time
+
+import cv2
+import mediapipe as mp
+import numpy as np
+
+from holistic_tracking import grip_value
+
+mp_holistic = mp.solutions.holistic
+mp_drawing = mp.solutions.drawing_utils
+mp_styles = mp.solutions.drawing_styles
+PoseLandmark = mp_holistic.PoseLandmark
+
+BOX_CENTER_MM = np.array([250.0, 0.0, 200.0])
+BOX_HALF_SIZE_MM = np.array([100.0, 150.0, 100.0])
+HOME_ANGLES_DEG = [0, 0, 0, 0, 0, 0]
+HOME_SPEED_DEG_S = 30
+MOVE_SPEED_MM_S = 100
+
+EMA_ALPHA = 0.3
+MAX_STEP_MM = 8.0
+SERVO_RATE_HZ = 30
+MIN_VISIBILITY = 0.5
+RECOVERY_COOLDOWN_S = 2.0
+
+WINDOW_NAME = "CV4HAL - Sim Bridge (press q to quit)"
+
+
+def arm_to_offset(world_landmarks):
+    lm = world_landmarks.landmark
+    shoulder = lm[PoseLandmark.RIGHT_SHOULDER.value]
+    elbow = lm[PoseLandmark.RIGHT_ELBOW.value]
+    wrist = lm[PoseLandmark.RIGHT_WRIST.value]
+
+    p_shoulder = np.array([shoulder.x, shoulder.y, shoulder.z])
+    p_elbow = np.array([elbow.x, elbow.y, elbow.z])
+    p_wrist = np.array([wrist.x, wrist.y, wrist.z])
+
+    arm_length = np.linalg.norm(p_elbow - p_shoulder) + np.linalg.norm(p_wrist - p_elbow)
+    if arm_length < 1e-6:
+        return None
+
+    dx, dy, dz = (p_wrist - p_shoulder) / arm_length
+    offset = np.array([-dz, dx, -dy])
+    return np.clip(offset, -1.0, 1.0)
+
+
+def arm_visible(pose_landmarks):
+    lm = pose_landmarks.landmark
+    joints = (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST)
+    return all(lm[j.value].visibility >= MIN_VISIBILITY for j in joints)
+
+
+def offset_to_target(offset):
+    return BOX_CENTER_MM + offset * BOX_HALF_SIZE_MM
+
+
+class TargetFilter:
+    def __init__(self, initial):
+        self.value = np.array(initial, dtype=float)
+
+    def update(self, raw):
+        self.value = EMA_ALPHA * np.asarray(raw) + (1.0 - EMA_ALPHA) * self.value
+        return self.value.copy()
+
+
+def limit_step(current, desired):
+    delta = desired - current
+    distance = np.linalg.norm(delta)
+    if distance <= MAX_STEP_MM:
+        return desired.copy()
+    return current + delta * (MAX_STEP_MM / distance)
+
+
+class RobotLink:
+    def __init__(self, ip, rate_hz):
+        self.ip = ip
+        self.period = 1.0 / rate_hz
+        self.arm = None
+        self.orientation = None
+        self.command = BOX_CENTER_MM.copy()
+        self.goal = BOX_CENTER_MM.copy()
+        self.status = "OFFLINE"
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def connect(self):
+        from xarm.wrapper import XArmAPI
+
+        self.status = "CONNECTING"
+        self.arm = XArmAPI(self.ip)
+        if not self.arm.connected:
+            raise ConnectionError(f"Could not connect to the robot at {self.ip}")
+        self.prepare()
+        self.go_home()
+        self.start_servo()
+
+    def prepare(self):
+        self.arm.clean_error()
+        self.arm.clean_warn()
+        self.arm.motion_enable(enable=True)
+        self.arm.set_mode(0)
+        self.arm.set_state(0)
+
+    def go_home(self):
+        self.status = "HOMING"
+        self.arm.set_servo_angle(angle=HOME_ANGLES_DEG, speed=HOME_SPEED_DEG_S, wait=True)
+        _, pose = self.arm.get_position()
+        self.orientation = list(pose[3:6])
+        self.arm.set_position(*BOX_CENTER_MM, *self.orientation,
+                              speed=MOVE_SPEED_MM_S, wait=True)
+
+    def start_servo(self):
+        self.arm.set_mode(1)
+        self.arm.set_state(0)
+        self.status = "SERVO"
+        self.thread = threading.Thread(target=self.servo_loop, daemon=True)
+        self.thread.start()
+
+    def set_goal(self, target):
+        with self.lock:
+            self.goal = np.asarray(target, dtype=float)
+
+    def servo_loop(self):
+        next_tick = time.perf_counter()
+        last_recovery = 0.0
+        while not self.stop_event.is_set():
+            with self.lock:
+                goal = self.goal.copy()
+            self.command = limit_step(self.command, goal)
+            code = self.arm.set_servo_cartesian([*self.command, *self.orientation], is_radian=False)
+            if code != 0 or self.arm.error_code != 0:
+                self.status = f"ERROR {code}/{self.arm.error_code}"
+                now = time.perf_counter()
+                if now - last_recovery > RECOVERY_COOLDOWN_S:
+                    last_recovery = now
+                    self.recover()
+            else:
+                self.status = "SERVO"
+            next_tick += self.period
+            time.sleep(max(0.0, next_tick - time.perf_counter()))
+
+    def recover(self):
+        self.arm.clean_error()
+        self.arm.clean_warn()
+        self.arm.motion_enable(enable=True)
+        self.arm.set_mode(1)
+        self.arm.set_state(0)
+
+    def shutdown(self):
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
+        if self.arm is None:
+            return
+        try:
+            self.arm.set_state(4)
+            self.arm.set_mode(0)
+            self.arm.set_state(0)
+        finally:
+            self.arm.disconnect()
+            self.status = "DISCONNECTED"
+
+
+def draw_overlay(image, fps, target, grip, tracking, robot_status):
+    cv2.rectangle(image, (0, 0), (360, 158), (30, 30, 30), -1)
+
+    def put(text, row, color=(255, 255, 255)):
+        cv2.putText(image, text, (12, 28 + row * 26),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, color, 2, cv2.LINE_AA)
+
+    put(f"FPS:      {fps:5.1f}", 0, (180, 220, 180))
+    put(f"Target:   {target[0]:6.1f} {target[1]:6.1f} {target[2]:6.1f} mm", 1)
+    put(f"Grip:     {grip:5.2f}" if grip is not None else "Grip:       --", 2)
+    put("Tracking: OK" if tracking else "Tracking: LOST (holding pose)", 3,
+        (120, 230, 120) if tracking else (80, 180, 255))
+    put(f"Robot:    {robot_status}", 4)
+
+
+def run(args):
+    robot = None if args.dry_run else RobotLink(args.ip, args.rate)
+    cap = cv2.VideoCapture(args.camera)
+    try:
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open camera {args.camera}")
+        if robot is not None:
+            robot.connect()
+
+        target_filter = TargetFilter(BOX_CENTER_MM)
+        target = BOX_CENTER_MM.copy()
+        grip = None
+        fps = 0.0
+        prev_time = time.perf_counter()
+
+        with mp_holistic.Holistic(
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=1,
+        ) as holistic:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    continue
+
+                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image.flags.writeable = False
+                results = holistic.process(image)
+                image.flags.writeable = True
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+                tracking = (results.pose_landmarks is not None
+                            and results.pose_world_landmarks is not None
+                            and arm_visible(results.pose_landmarks))
+                if tracking:
+                    offset = arm_to_offset(results.pose_world_landmarks)
+                    if offset is not None:
+                        target = target_filter.update(offset_to_target(offset))
+                        if robot is not None:
+                            robot.set_goal(target)
+                    else:
+                        tracking = False
+
+                if results.right_hand_landmarks:
+                    grip = grip_value(results.right_hand_landmarks)
+
+                if results.pose_landmarks:
+                    mp_drawing.draw_landmarks(
+                        image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
+                        landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style())
+
+                now = time.perf_counter()
+                dt = now - prev_time
+                prev_time = now
+                if dt > 0:
+                    fps = 1.0 / dt if fps == 0 else 0.9 * fps + 0.1 * (1.0 / dt)
+
+                image = cv2.flip(image, 1)
+                status = "DRY RUN" if robot is None else robot.status
+                draw_overlay(image, fps, target, grip, tracking, status)
+                cv2.imshow(WINDOW_NAME, image)
+
+                if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                    break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        if robot is not None:
+            robot.shutdown()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="CV4HAL MediaPipe to UFACTORY Lite 6 bridge")
+    parser.add_argument("--ip", default="127.0.0.1", help="robot or simulator IP")
+    parser.add_argument("--camera", type=int, default=0, help="camera index")
+    parser.add_argument("--rate", type=float, default=SERVO_RATE_HZ, help="servo rate in Hz")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="run tracking and compute targets without connecting to the robot")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    run(parse_args())
