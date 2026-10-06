@@ -18,6 +18,9 @@ BOX_HALF_SIZE_MM = np.array([100.0, 150.0, 100.0])
 HOME_SPEED_DEG_S = 30
 MOVE_SPEED_MM_S = 100
 
+FORWARD_NEUTRAL = 0.45
+FORWARD_RANGE = 0.35
+
 EMA_ALPHA = 0.3
 MAX_STEP_MM = 8.0
 SERVO_RATE_HZ = 30
@@ -42,7 +45,8 @@ def arm_to_offset(world_landmarks):
         return None
 
     dx, dy, dz = (p_wrist - p_shoulder) / arm_length
-    offset = np.array([dz, dx, -dy])
+    forward = (-dz - FORWARD_NEUTRAL) / FORWARD_RANGE
+    offset = np.array([forward, dx, -dy])
     return np.clip(offset, -1.0, 1.0)
 
 
