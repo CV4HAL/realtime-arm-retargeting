@@ -61,20 +61,21 @@ def offset_to_target(offset):
 
 
 class TargetFilter:
-    def __init__(self, initial):
+    def __init__(self, initial, alpha=EMA_ALPHA):
         self.value = np.array(initial, dtype=float)
+        self.alpha = alpha
 
     def update(self, raw):
-        self.value = EMA_ALPHA * np.asarray(raw) + (1.0 - EMA_ALPHA) * self.value
+        self.value = self.alpha * np.asarray(raw) + (1.0 - self.alpha) * self.value
         return self.value.copy()
 
 
-def limit_step(current, desired):
+def limit_step(current, desired, max_step=MAX_STEP_MM):
     delta = desired - current
     distance = np.linalg.norm(delta)
-    if distance <= MAX_STEP_MM:
+    if distance <= max_step:
         return desired.copy()
-    return current + delta * (MAX_STEP_MM / distance)
+    return current + delta * (max_step / distance)
 
 
 class RobotLink:
