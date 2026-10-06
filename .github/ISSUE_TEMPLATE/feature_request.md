@@ -1,16 +1,16 @@
 ---
 name: Feature request
-about: Propón una nueva funcionalidad o mejora
+about: Suggest a new feature or improvement
 title: "[Feature] "
 labels: feature
 ---
 
-## Problema o necesidad
-¿Qué quieres lograr y por qué?
+## Problem or need
+What do you want to achieve and why?
 
-## Propuesta
-¿Cómo imaginas la solución?
+## Proposal
+How do you imagine the solution?
 
-## Alternativas consideradas
+## Alternatives considered
 
-## Contexto adicional
+## Additional context

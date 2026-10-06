@@ -1,5 +1,5 @@
 target-version = "py311"
 
 [lint]
-# Solo errores reales (sintaxis, nombres indefinidos, imports sin usar)
+# Real errors only (syntax errors, undefined names, unused imports)
 select = ["E9", "F"]

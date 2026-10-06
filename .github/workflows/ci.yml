@@ -24,13 +24,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Smoke check (compilación)
+      - name: Smoke check (compile)
         run: python -m compileall -q src
-      - name: Tests (si existen)
+      - name: Tests (if present)
         run: |
           if [ -d tests ]; then
             pip install pytest
             pytest
           else
-            echo "No hay tests todavía"
+            echo "No tests yet"
           fi

@@ -1,18 +1,18 @@
-## Descripción
-¿Qué cambia este PR y por qué?
+## Description
+What does this PR change and why?
 
-## Tipo de cambio
+## Type of change
 - [ ] feature
 - [ ] fix
 - [ ] docs
 - [ ] chore
 
-## Cómo se probó
-(Simulador, robot real, script, etc.)
+## How it was tested
+(Simulator, real robot, script, etc.)
 
 ## Checklist
-- [ ] La rama sigue el formato `feature/`, `fix/` o `docs/`
-- [ ] El CI pasa
-- [ ] Actualicé la documentación si hizo falta
+- [ ] Branch follows the `feature/`, `fix/` or `docs/` format
+- [ ] CI passes
+- [ ] Documentation updated if needed
 
 Closes #

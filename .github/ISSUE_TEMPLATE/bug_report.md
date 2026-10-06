@@ -1,23 +1,23 @@
 ---
 name: Bug report
-about: Reporta algo que no funciona
+about: Report something that isn't working
 title: "[Bug] "
 labels: bug
 ---
 
-## Descripción
-¿Qué está pasando?
+## Description
+What is happening?
 
-## Pasos para reproducir
+## Steps to reproduce
 1.
 2.
 3.
 
-## Comportamiento esperado
+## Expected behavior
 
-## Entorno
-- SO:
-- Versión de Python:
-- Hardware (cámara / robot / simulador):
+## Environment
+- OS:
+- Python version:
+- Hardware (camera / robot / simulator):
 
-## Logs o capturas
+## Logs or screenshots

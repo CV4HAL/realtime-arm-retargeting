@@ -1,18 +1,18 @@
-# Contribuir
+# Contributing
 
-## Flujo de trabajo
-- `main` es la rama estable.
-- Todo el trabajo se hace en ramas propias:
-  - `feature/<nombre>` para nuevas funciones
-  - `fix/<nombre>` para correcciones
-  - `docs/<nombre>` para documentación
-- Nada se sube directo a `main`: todo entra por Pull Request con al menos un review aprobado y el CI en verde.
+## Workflow
+- `main` is the stable branch.
+- All work happens on dedicated branches:
+  - `feature/<name>` for new features
+  - `fix/<name>` for bug fixes
+  - `docs/<name>` for documentation
+- Nothing is pushed directly to `main`: everything goes through a Pull Request with at least one approving review and passing CI.
 
-## Pasos
-1. Crea tu rama desde `main` actualizada.
-2. Haz commits pequeños con mensajes claros.
-3. Abre un Pull Request hacia `main` usando la plantilla.
-4. Atiende los comentarios del review y espera la aprobación.
+## Steps
+1. Create your branch from an up-to-date `main`.
+2. Make small commits with clear messages.
+3. Open a Pull Request to `main` using the template.
+4. Address review comments and wait for approval.
 
-## Entorno
-Python 3.11. Instala dependencias con `pip install -r requirements.txt`.
+## Environment
+Python 3.11. Install dependencies with `pip install -r requirements.txt`.
