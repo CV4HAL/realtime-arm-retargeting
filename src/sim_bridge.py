@@ -23,6 +23,7 @@ FORWARD_RANGE = 0.35
 
 EMA_ALPHA = 0.3
 MAX_STEP_MM = 8.0
+MAX_ANGLE_STEP_DEG = 2.0
 SERVO_RATE_HZ = 30
 MIN_VISIBILITY = 0.5
 RECOVERY_COOLDOWN_S = 2.0
@@ -78,6 +79,10 @@ def limit_step(current, desired, max_step=MAX_STEP_MM):
     return current + delta * (max_step / distance)
 
 
+def wrap_angle(angles):
+    return np.where(np.abs(angles) > 180.0, angles - 360.0 * np.sign(angles), angles)
+
+
 class RobotLink:
     def __init__(self, ip, rate_hz):
         self.ip = ip
@@ -86,6 +91,8 @@ class RobotLink:
         self.orientation = None
         self.command = BOX_CENTER_MM.copy()
         self.goal = BOX_CENTER_MM.copy()
+        self.orientation_command = np.zeros(3)
+        self.orientation_goal = np.zeros(3)
         self.status = "OFFLINE"
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -124,9 +131,11 @@ class RobotLink:
         self.thread = threading.Thread(target=self.servo_loop, daemon=True)
         self.thread.start()
 
-    def set_goal(self, target):
+    def set_goal(self, target, orientation_offset=None):
         with self.lock:
             self.goal = np.asarray(target, dtype=float)
+            if orientation_offset is not None:
+                self.orientation_goal = np.asarray(orientation_offset, dtype=float)
 
     def servo_loop(self):
         next_tick = time.perf_counter()
@@ -134,8 +143,12 @@ class RobotLink:
         while not self.stop_event.is_set():
             with self.lock:
                 goal = self.goal.copy()
+                orientation_goal = self.orientation_goal.copy()
             self.command = limit_step(self.command, goal)
-            code = self.arm.set_servo_cartesian([*self.command, *self.orientation], is_radian=False)
+            self.orientation_command = limit_step(self.orientation_command, orientation_goal,
+                                                  MAX_ANGLE_STEP_DEG)
+            angles = wrap_angle(np.asarray(self.orientation) + self.orientation_command)
+            code = self.arm.set_servo_cartesian([*self.command, *angles], is_radian=False)
             if code != 0 or self.arm.error_code != 0:
                 self.status = f"ERROR {code}/{self.arm.error_code}"
                 now = time.perf_counter()
