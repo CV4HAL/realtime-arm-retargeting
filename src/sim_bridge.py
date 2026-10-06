@@ -15,7 +15,6 @@ PoseLandmark = mp_holistic.PoseLandmark
 
 BOX_CENTER_MM = np.array([250.0, 0.0, 200.0])
 BOX_HALF_SIZE_MM = np.array([100.0, 150.0, 100.0])
-HOME_ANGLES_DEG = [0, 0, 0, 0, 0, 0]
 HOME_SPEED_DEG_S = 30
 MOVE_SPEED_MM_S = 100
 
@@ -107,7 +106,7 @@ class RobotLink:
 
     def go_home(self):
         self.status = "HOMING"
-        self.arm.set_servo_angle(angle=HOME_ANGLES_DEG, speed=HOME_SPEED_DEG_S, wait=True)
+        self.arm.move_gohome(speed=HOME_SPEED_DEG_S, wait=True)
         _, pose = self.arm.get_position()
         self.orientation = list(pose[3:6])
         self.arm.set_position(*BOX_CENTER_MM, *self.orientation,
