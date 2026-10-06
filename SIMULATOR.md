@@ -110,9 +110,22 @@ python src/sim_bridge.py --dry-run
 # Against the simulator (robot homes, then follows your wrist)
 python src/sim_bridge.py --ip 127.0.0.1
 
+# Dual-hand mode: right arm moves the TCP, left hand sets its orientation
+python src/sim_bridge.py --dual-hand --ip 127.0.0.1
+python src/sim_bridge.py --dual-hand --dry-run
+
 # Other camera / servo rate
 python src/sim_bridge.py --camera 1 --rate 30
 ```
+
+With `--dual-hand` the right arm still drives the TCP position and the
+gripper value, while the left hand drives the TCP roll, pitch and yaw as
+offsets from the home orientation. Tilt and rotate your open left hand in
+front of the camera; small movements inside the dead zone are ignored. Close
+the left hand into a fist to freeze the orientation, and open it to resume.
+If the left hand leaves the frame the last orientation is held. The overlay
+shows the roll/pitch/yaw offsets and the clutch state. The angle ranges, dead
+zone and fist thresholds are constants at the top of `src/sim_bridge.py`.
 
 Press `q` or `Esc` in the video window to stop the arm, return to position
 mode and disconnect. The workspace box and smoothing limits are constants at
