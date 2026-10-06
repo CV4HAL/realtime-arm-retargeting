@@ -80,6 +80,25 @@ def grip_value(hand_landmarks):
     return pinch / hand_size
 
 
+def hand_openness(hand_landmarks):
+    """
+    Mean fingertip distance from the wrist, divided by hand size.
+
+    Roughly 2.0 for an open hand and below 1.2 for a closed fist, so it can
+    be thresholded to tell a fist from an open hand at any camera distance.
+    """
+    lm = hand_landmarks.landmark
+
+    wrist = np.array([lm[0].x, lm[0].y, lm[0].z])
+    middle_mcp = np.array([lm[9].x, lm[9].y, lm[9].z])
+    tips = np.array([[lm[i].x, lm[i].y, lm[i].z] for i in (8, 12, 16, 20)])
+
+    hand_size = np.linalg.norm(wrist - middle_mcp)
+    if hand_size < 1e-6:
+        return 0.0
+    return np.mean(np.linalg.norm(tips - wrist, axis=1)) / hand_size
+
+
 # ----------------------------------------------------------------------
 # Main loop
 # ----------------------------------------------------------------------
