@@ -81,12 +81,6 @@ def grip_value(hand_landmarks):
 
 
 def hand_openness(hand_landmarks):
-    """
-    Mean fingertip distance from the wrist, divided by hand size.
-
-    Roughly 2.0 for an open hand and below 1.2 for a closed fist, so it can
-    be thresholded to tell a fist from an open hand at any camera distance.
-    """
     lm = hand_landmarks.landmark
 
     wrist = np.array([lm[0].x, lm[0].y, lm[0].z])
