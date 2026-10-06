@@ -94,3 +94,27 @@ When the real arm arrives:
    robot — those only exist to run the simulated firmware. Once you're
    pointed at the physical controller's IP, that traffic goes straight to
    the robot instead of to this container.
+
+## Running the CV bridge
+
+`src/sim_bridge.py` tracks your right arm with MediaPipe and drives the
+Lite 6 with Cartesian servo commands. Start the simulator first (see above),
+then from the repository root:
+
+```bash
+pip install -r requirements.txt
+
+# Tracking only: computes targets, never connects to the robot
+python src/sim_bridge.py --dry-run
+
+# Against the simulator (robot homes, then follows your wrist)
+python src/sim_bridge.py --ip 127.0.0.1
+
+# Other camera / servo rate
+python src/sim_bridge.py --camera 1 --rate 30
+```
+
+Press `q` or `Esc` in the video window to stop the arm, return to position
+mode and disconnect. The workspace box and smoothing limits are constants at
+the top of `src/sim_bridge.py`. Watch the arm in UFACTORY Studio at
+`http://127.0.0.1:18333`.
