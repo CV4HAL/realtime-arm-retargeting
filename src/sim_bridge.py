@@ -42,7 +42,7 @@ def arm_to_offset(world_landmarks):
         return None
 
     dx, dy, dz = (p_wrist - p_shoulder) / arm_length
-    offset = np.array([-dz, dx, -dy])
+    offset = np.array([dz, dx, -dy])
     return np.clip(offset, -1.0, 1.0)
 
 
