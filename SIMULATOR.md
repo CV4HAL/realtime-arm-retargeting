@@ -114,6 +114,9 @@ python src/sim_bridge.py --ip 127.0.0.1
 python src/sim_bridge.py --dual-hand --ip 127.0.0.1
 python src/sim_bridge.py --dual-hand --dry-run
 
+# Camera reports the hands the wrong way round: swap left and right
+python src/sim_bridge.py --dual-hand --swap-hands --dry-run
+
 # Other camera / servo rate
 python src/sim_bridge.py --camera 1 --rate 30
 ```
@@ -126,6 +129,10 @@ the left hand into a fist to freeze the orientation, and open it to resume.
 If the left hand leaves the frame the last orientation is held. The overlay
 shows the roll/pitch/yaw offsets and the clutch state. The angle ranges, dead
 zone and fist thresholds are constants at the top of `src/sim_bridge.py`.
+
+Each detected hand is labelled `L` or `R` on its wrist in the mirrored video
+window. Raise your left hand and check that the `L` label follows it; if the
+labels are reversed, add `--swap-hands`.
 
 Press `q` or `Esc` in the video window to stop the arm, return to position
 mode and disconnect. The workspace box and smoothing limits are constants at
