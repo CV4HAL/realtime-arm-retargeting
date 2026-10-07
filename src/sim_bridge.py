@@ -6,7 +6,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from holistic_tracking import grip_value
+from holistic_tracking import grip_value, hand_openness, scaled_points
 
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -23,9 +23,16 @@ FORWARD_RANGE = 0.35
 
 EMA_ALPHA = 0.3
 MAX_STEP_MM = 8.0
+MAX_ANGLE_STEP_DEG = 2.0
 SERVO_RATE_HZ = 30
 MIN_VISIBILITY = 0.5
 RECOVERY_COOLDOWN_S = 2.0
+
+HAND_ANGLE_RANGE_DEG = np.array([60.0, 45.0, 60.0])
+ORIENTATION_RANGE_DEG = np.array([30.0, 30.0, 45.0])
+ORIENTATION_DEADZONE_DEG = 8.0
+FIST_ON_THRESHOLD = 1.15
+FIST_OFF_THRESHOLD = 1.4
 
 WINDOW_NAME = "CV4HAL - Sim Bridge (press q to quit)"
 
@@ -60,21 +67,63 @@ def offset_to_target(offset):
     return BOX_CENTER_MM + offset * BOX_HALF_SIZE_MM
 
 
+def hand_to_angles(hand_landmarks, width, height):
+    wrist, index_mcp, middle_mcp, pinky_mcp = scaled_points(
+        hand_landmarks, (0, 5, 9, 17), width, height)
+
+    forward = middle_mcp - wrist
+    normal = np.cross(index_mcp - wrist, pinky_mcp - wrist)
+    forward_norm = np.linalg.norm(forward)
+    normal_norm = np.linalg.norm(normal)
+    if forward_norm < 1e-6 or normal_norm < 1e-6:
+        return None
+    forward /= forward_norm
+    normal /= normal_norm
+
+    roll = np.degrees(np.arctan2(normal[0], normal[2]))
+    pitch = np.degrees(np.arcsin(np.clip(forward[2], -1.0, 1.0)))
+    yaw = np.degrees(np.arctan2(forward[0], -forward[1]))
+    return np.array([roll, pitch, yaw])
+
+
+def angles_to_offset(angles):
+    shrunk = np.sign(angles) * np.maximum(np.abs(angles) - ORIENTATION_DEADZONE_DEG, 0.0)
+    span = HAND_ANGLE_RANGE_DEG - ORIENTATION_DEADZONE_DEG
+    return np.clip(shrunk / span, -1.0, 1.0) * ORIENTATION_RANGE_DEG
+
+
+class Clutch:
+    def __init__(self):
+        self.engaged = False
+
+    def update(self, openness):
+        if self.engaged and openness > FIST_OFF_THRESHOLD:
+            self.engaged = False
+        elif not self.engaged and openness < FIST_ON_THRESHOLD:
+            self.engaged = True
+        return self.engaged
+
+
 class TargetFilter:
-    def __init__(self, initial):
+    def __init__(self, initial, alpha=EMA_ALPHA):
         self.value = np.array(initial, dtype=float)
+        self.alpha = alpha
 
     def update(self, raw):
-        self.value = EMA_ALPHA * np.asarray(raw) + (1.0 - EMA_ALPHA) * self.value
+        self.value = self.alpha * np.asarray(raw) + (1.0 - self.alpha) * self.value
         return self.value.copy()
 
 
-def limit_step(current, desired):
+def limit_step(current, desired, max_step=MAX_STEP_MM):
     delta = desired - current
     distance = np.linalg.norm(delta)
-    if distance <= MAX_STEP_MM:
+    if distance <= max_step:
         return desired.copy()
-    return current + delta * (MAX_STEP_MM / distance)
+    return current + delta * (max_step / distance)
+
+
+def wrap_angle(angles):
+    return np.where(np.abs(angles) > 180.0, angles - 360.0 * np.sign(angles), angles)
 
 
 class RobotLink:
@@ -85,6 +134,8 @@ class RobotLink:
         self.orientation = None
         self.command = BOX_CENTER_MM.copy()
         self.goal = BOX_CENTER_MM.copy()
+        self.orientation_command = np.zeros(3)
+        self.orientation_goal = np.zeros(3)
         self.status = "OFFLINE"
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -123,9 +174,11 @@ class RobotLink:
         self.thread = threading.Thread(target=self.servo_loop, daemon=True)
         self.thread.start()
 
-    def set_goal(self, target):
+    def set_goal(self, target, orientation_offset=None):
         with self.lock:
             self.goal = np.asarray(target, dtype=float)
+            if orientation_offset is not None:
+                self.orientation_goal = np.asarray(orientation_offset, dtype=float)
 
     def servo_loop(self):
         next_tick = time.perf_counter()
@@ -133,8 +186,12 @@ class RobotLink:
         while not self.stop_event.is_set():
             with self.lock:
                 goal = self.goal.copy()
+                orientation_goal = self.orientation_goal.copy()
             self.command = limit_step(self.command, goal)
-            code = self.arm.set_servo_cartesian([*self.command, *self.orientation], is_radian=False)
+            self.orientation_command = limit_step(self.orientation_command, orientation_goal,
+                                                  MAX_ANGLE_STEP_DEG)
+            angles = wrap_angle(np.asarray(self.orientation) + self.orientation_command)
+            code = self.arm.set_servo_cartesian([*self.command, *angles], is_radian=False)
             if code != 0 or self.arm.error_code != 0:
                 self.status = f"ERROR {code}/{self.arm.error_code}"
                 now = time.perf_counter()
@@ -168,8 +225,22 @@ class RobotLink:
             self.status = "DISCONNECTED"
 
 
-def draw_overlay(image, fps, target, grip, tracking, robot_status):
-    cv2.rectangle(image, (0, 0), (360, 158), (30, 30, 30), -1)
+def operator_hands(results, swap):
+    left, right = results.left_hand_landmarks, results.right_hand_landmarks
+    return (right, left) if swap else (left, right)
+
+
+def draw_hand_label(image, hand_landmarks, text):
+    height, width = image.shape[:2]
+    wrist = hand_landmarks.landmark[0]
+    x = width - int(wrist.x * width)
+    y = int(wrist.y * height)
+    cv2.putText(image, text, (x - 10, y + 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
+
+
+def draw_overlay(image, fps, target, grip, tracking, robot_status, orientation=None, clutch=None):
+    cv2.rectangle(image, (0, 0), (360, 158 if orientation is None else 210), (30, 30, 30), -1)
 
     def put(text, row, color=(255, 255, 255)):
         cv2.putText(image, text, (12, 28 + row * 26),
@@ -181,6 +252,10 @@ def draw_overlay(image, fps, target, grip, tracking, robot_status):
     put("Tracking: OK" if tracking else "Tracking: LOST (holding pose)", 3,
         (120, 230, 120) if tracking else (80, 180, 255))
     put(f"Robot:    {robot_status}", 4)
+    if orientation is not None:
+        put(f"RPY:      {orientation[0]:5.1f} {orientation[1]:5.1f} {orientation[2]:5.1f} deg", 5)
+        put("Clutch:   FROZEN (fist)" if clutch else "Clutch:   LIVE (open)", 6,
+            (80, 180, 255) if clutch else (120, 230, 120))
 
 
 def run(args):
@@ -194,6 +269,9 @@ def run(args):
 
         target_filter = TargetFilter(BOX_CENTER_MM)
         target = BOX_CENTER_MM.copy()
+        orientation_filter = TargetFilter(np.zeros(3))
+        orientation = np.zeros(3)
+        clutch = Clutch()
         grip = None
         fps = 0.0
         prev_time = time.perf_counter()
@@ -226,8 +304,21 @@ def run(args):
                     else:
                         tracking = False
 
-                if results.right_hand_landmarks:
-                    grip = grip_value(results.right_hand_landmarks)
+                left_hand, right_hand = operator_hands(results, args.swap_hands)
+
+                if right_hand:
+                    grip = grip_value(right_hand)
+
+                if args.dual_hand and left_hand:
+                    height, width = frame.shape[:2]
+                    clutch.update(hand_openness(left_hand, width, height))
+                    if not clutch.engaged:
+                        angles = hand_to_angles(left_hand, width, height)
+                        if angles is not None:
+                            orientation = orientation_filter.update(angles_to_offset(angles))
+
+                if args.dual_hand and robot is not None:
+                    robot.set_goal(target, orientation)
 
                 if results.pose_landmarks:
                     mp_drawing.draw_landmarks(
@@ -241,8 +332,15 @@ def run(args):
                     fps = 1.0 / dt if fps == 0 else 0.9 * fps + 0.1 * (1.0 / dt)
 
                 image = cv2.flip(image, 1)
+                for hand, text in ((left_hand, "L"), (right_hand, "R")):
+                    if hand:
+                        draw_hand_label(image, hand, text)
                 status = "DRY RUN" if robot is None else robot.status
-                draw_overlay(image, fps, target, grip, tracking, status)
+                if args.dual_hand:
+                    draw_overlay(image, fps, target, grip, tracking, status,
+                                 orientation, clutch.engaged)
+                else:
+                    draw_overlay(image, fps, target, grip, tracking, status)
                 cv2.imshow(WINDOW_NAME, image)
 
                 if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
@@ -259,6 +357,10 @@ def parse_args():
     parser.add_argument("--ip", default="127.0.0.1", help="robot or simulator IP")
     parser.add_argument("--camera", type=int, default=0, help="camera index")
     parser.add_argument("--rate", type=float, default=SERVO_RATE_HZ, help="servo rate in Hz")
+    parser.add_argument("--dual-hand", action="store_true",
+                        help="left hand sets the TCP orientation, closed fist freezes it")
+    parser.add_argument("--swap-hands", action="store_true",
+                        help="swap the left and right hand assignment")
     parser.add_argument("--dry-run", action="store_true",
                         help="run tracking and compute targets without connecting to the robot")
     return parser.parse_args()
