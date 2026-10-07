@@ -225,6 +225,20 @@ class RobotLink:
             self.status = "DISCONNECTED"
 
 
+def operator_hands(results, swap):
+    left, right = results.left_hand_landmarks, results.right_hand_landmarks
+    return (right, left) if swap else (left, right)
+
+
+def draw_hand_label(image, hand_landmarks, text):
+    height, width = image.shape[:2]
+    wrist = hand_landmarks.landmark[0]
+    x = width - int(wrist.x * width)
+    y = int(wrist.y * height)
+    cv2.putText(image, text, (x - 10, y + 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
+
+
 def draw_overlay(image, fps, target, grip, tracking, robot_status, orientation=None, clutch=None):
     cv2.rectangle(image, (0, 0), (360, 158 if orientation is None else 210), (30, 30, 30), -1)
 
@@ -290,14 +304,16 @@ def run(args):
                     else:
                         tracking = False
 
-                if results.right_hand_landmarks:
-                    grip = grip_value(results.right_hand_landmarks)
+                left_hand, right_hand = operator_hands(results, args.swap_hands)
 
-                if args.dual_hand and results.left_hand_landmarks:
+                if right_hand:
+                    grip = grip_value(right_hand)
+
+                if args.dual_hand and left_hand:
                     height, width = frame.shape[:2]
-                    clutch.update(hand_openness(results.left_hand_landmarks, width, height))
+                    clutch.update(hand_openness(left_hand, width, height))
                     if not clutch.engaged:
-                        angles = hand_to_angles(results.left_hand_landmarks, width, height)
+                        angles = hand_to_angles(left_hand, width, height)
                         if angles is not None:
                             orientation = orientation_filter.update(angles_to_offset(angles))
 
@@ -316,6 +332,9 @@ def run(args):
                     fps = 1.0 / dt if fps == 0 else 0.9 * fps + 0.1 * (1.0 / dt)
 
                 image = cv2.flip(image, 1)
+                for hand, text in ((left_hand, "L"), (right_hand, "R")):
+                    if hand:
+                        draw_hand_label(image, hand, text)
                 status = "DRY RUN" if robot is None else robot.status
                 if args.dual_hand:
                     draw_overlay(image, fps, target, grip, tracking, status,
@@ -340,6 +359,8 @@ def parse_args():
     parser.add_argument("--rate", type=float, default=SERVO_RATE_HZ, help="servo rate in Hz")
     parser.add_argument("--dual-hand", action="store_true",
                         help="left hand sets the TCP orientation, closed fist freezes it")
+    parser.add_argument("--swap-hands", action="store_true",
+                        help="swap the left and right hand assignment")
     parser.add_argument("--dry-run", action="store_true",
                         help="run tracking and compute targets without connecting to the robot")
     return parser.parse_args()
