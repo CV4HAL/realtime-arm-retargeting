@@ -6,7 +6,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from holistic_tracking import grip_value, hand_openness
+from holistic_tracking import grip_value, hand_openness, scaled_points
 
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -68,10 +68,8 @@ def offset_to_target(offset):
 
 
 def hand_to_angles(hand_landmarks, width, height):
-    lm = hand_landmarks.landmark
-    scale = np.array([width, height, width])
-    wrist, index_mcp, middle_mcp, pinky_mcp = (
-        np.array([lm[i].x, lm[i].y, lm[i].z]) * scale for i in (0, 5, 9, 17))
+    wrist, index_mcp, middle_mcp, pinky_mcp = scaled_points(
+        hand_landmarks, (0, 5, 9, 17), width, height)
 
     forward = middle_mcp - wrist
     normal = np.cross(index_mcp - wrist, pinky_mcp - wrist)
@@ -296,9 +294,9 @@ def run(args):
                     grip = grip_value(results.right_hand_landmarks)
 
                 if args.dual_hand and results.left_hand_landmarks:
-                    clutch.update(hand_openness(results.left_hand_landmarks))
+                    height, width = frame.shape[:2]
+                    clutch.update(hand_openness(results.left_hand_landmarks, width, height))
                     if not clutch.engaged:
-                        height, width = frame.shape[:2]
                         angles = hand_to_angles(results.left_hand_landmarks, width, height)
                         if angles is not None:
                             orientation = orientation_filter.update(angles_to_offset(angles))

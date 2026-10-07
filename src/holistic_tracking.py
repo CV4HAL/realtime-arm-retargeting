@@ -80,17 +80,19 @@ def grip_value(hand_landmarks):
     return pinch / hand_size
 
 
-def hand_openness(hand_landmarks):
+def scaled_points(hand_landmarks, indices, width, height):
     lm = hand_landmarks.landmark
+    scale = np.array([width, height, width])
+    return np.array([[lm[i].x, lm[i].y, lm[i].z] for i in indices]) * scale
 
-    wrist = np.array([lm[0].x, lm[0].y, lm[0].z])
-    middle_mcp = np.array([lm[9].x, lm[9].y, lm[9].z])
-    tips = np.array([[lm[i].x, lm[i].y, lm[i].z] for i in (8, 12, 16, 20)])
+
+def hand_openness(hand_landmarks, width, height):
+    wrist, middle_mcp, *tips = scaled_points(hand_landmarks, (0, 9, 8, 12, 16, 20), width, height)
 
     hand_size = np.linalg.norm(wrist - middle_mcp)
     if hand_size < 1e-6:
         return 0.0
-    return np.mean(np.linalg.norm(tips - wrist, axis=1)) / hand_size
+    return np.mean(np.linalg.norm(np.array(tips) - wrist, axis=1)) / hand_size
 
 
 # ----------------------------------------------------------------------
