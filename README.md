@@ -44,15 +44,36 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick start
+
+Everything is launched through `./run.sh` (run `./run.sh --help` for the full list):
 
 ```bash
-# 1. Connect to the Lite 6 (or run in UFACTORY simulator first)
-# 2. Start the vision pipeline
-python src/main.py
+# 1. One-time setup (Python 3.11)
+python3.11 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 2. Check the environment and camera
+./run.sh check
+
+# 3. Start the UFACTORY simulator (Docker, see SIMULATOR.md)
+./run.sh sim-up
+
+# 4. Run the CV bridge
+./run.sh sim --dry-run                  # tracking only, no robot connection
+./run.sh sim                            # follow your right wrist in the simulator
+./run.sh sim --dual-hand                # left hand also sets the TCP orientation
+./run.sh sim --dual-hand --swap-hands   # if the L/R labels are reversed
+./run.sh sim --ip 192.168.1.50          # real robot
+
+# Other commands
+./run.sh cv --camera 1                  # holistic tracking on camera 1
+./run.sh pose                           # basic pose tracking
+./run.sh test                           # pytest + ruff
+./run.sh sim-down                       # stop the simulator
 ```
 
-*(Detailed setup instructions coming as the pipeline is being built.)*
+See [SIMULATOR.md](SIMULATOR.md) for the simulator and bridge details.
 
 ## Roadmap
 
