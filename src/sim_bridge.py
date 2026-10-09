@@ -229,7 +229,17 @@ def operator_hands(results, swap):
     left, right = results.left_hand_landmarks, results.right_hand_landmarks
     return (right, left) if swap else (left, right)
 
-
+def draw_arm(image, pose_landmarks, tracking):
+    height, width = image.shape[:2]
+    joints = (PoseLandmark.RIGHT_SHOULDER, PoseLandmark.RIGHT_ELBOW, PoseLandmark.RIGHT_WRIST)
+    points = [(int(pose_landmarks.landmark[j.value].x * width),
+               int(pose_landmarks.landmark[j.value].y * height)) for j in joints]
+    color = (120, 230, 120) if tracking else (80, 180, 255)
+    cv2.line(image, points[0], points[1], color, 3, cv2.LINE_AA)
+    cv2.line(image, points[1], points[2], color, 3, cv2.LINE_AA)
+    for point in points:
+        cv2.circle(image, point, 6, color, -1, cv2.LINE_AA)
+        
 def draw_hand_label(image, hand_landmarks, text):
     height, width = image.shape[:2]
     wrist = hand_landmarks.landmark[0]
@@ -321,9 +331,14 @@ def run(args):
                     robot.set_goal(target, orientation)
 
                 if results.pose_landmarks:
-                    mp_drawing.draw_landmarks(
-                        image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
-                        landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style())
+                    draw_arm(image, results.pose_landmarks, tracking)
+                    
+                for hand in (results.left_hand_landmarks, results.right_hand_landmarks):
+                    if hand:
+                        mp_drawing.draw_landmarks(
+                            image, hand, mp_holistic.HAND_CONNECTIONS,
+                            mp_styles.get_default_hand_landmarks_style(),
+                            mp_styles.get_default_hand_connections_style())
 
                 now = time.perf_counter()
                 dt = now - prev_time
