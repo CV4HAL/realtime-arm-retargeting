@@ -7,6 +7,7 @@ import mediapipe as mp
 import numpy as np
 
 from holistic_tracking import grip_value, hand_openness, scaled_points
+from pinch import AXIS_NAMES, GESTURE_AXIS, PINCH_FINGERS, AxisLock, PinchDetector
 
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -33,6 +34,12 @@ ORIENTATION_RANGE_DEG = np.array([30.0, 30.0, 45.0])
 ORIENTATION_DEADZONE_DEG = 8.0
 FIST_ON_THRESHOLD = 1.15
 FIST_OFF_THRESHOLD = 1.4
+
+PINCH_IDLE_COLOR = (255, 200, 80)
+PINCH_ACTIVE_COLOR = (0, 140, 255)
+PINCH_LINE_IDLE_COLOR = (150, 150, 150)
+PINCH_TIP_RADIUS_PX = 9
+PINCH_LINE_THICKNESS_PX = 3
 
 WINDOW_NAME = "CV4HAL - Sim Bridge (press q to quit)"
 
@@ -137,6 +144,7 @@ class RobotLink:
         self.orientation_command = np.zeros(3)
         self.orientation_goal = np.zeros(3)
         self.status = "OFFLINE"
+        self.gripper_closed = False
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.thread = None
@@ -179,6 +187,17 @@ class RobotLink:
             self.goal = np.asarray(target, dtype=float)
             if orientation_offset is not None:
                 self.orientation_goal = np.asarray(orientation_offset, dtype=float)
+
+    def set_gripper(self, closed):
+        if closed == self.gripper_closed:
+            return
+        self.gripper_closed = closed
+        if self.arm is None:
+            return
+        if closed:
+            self.arm.close_lite6_gripper(sync=False)
+        else:
+            self.arm.open_lite6_gripper(sync=False)
 
     def servo_loop(self):
         next_tick = time.perf_counter()
@@ -249,6 +268,35 @@ def draw_hand_label(image, hand_landmarks, text):
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2, cv2.LINE_AA)
 
 
+def draw_pinch(image, hand_landmarks, gesture):
+    """Highlight the right-hand fingertips and the thumb-to-finger lines."""
+    height, width = image.shape[:2]
+    lm = hand_landmarks.landmark
+    thumb = (int(lm[4].x * width), int(lm[4].y * height))
+    for name, tip_index in PINCH_FINGERS.items():
+        tip = (int(lm[tip_index].x * width), int(lm[tip_index].y * height))
+        active = name == gesture
+        color = PINCH_ACTIVE_COLOR if active else PINCH_IDLE_COLOR
+        cv2.line(image, thumb, tip, color if active else PINCH_LINE_IDLE_COLOR,
+                 PINCH_LINE_THICKNESS_PX if active else 1, cv2.LINE_AA)
+        cv2.circle(image, tip, PINCH_TIP_RADIUS_PX, color, -1 if active else 2, cv2.LINE_AA)
+    cv2.circle(image, thumb, PINCH_TIP_RADIUS_PX, PINCH_ACTIVE_COLOR if gesture else PINCH_IDLE_COLOR,
+               -1 if gesture else 2, cv2.LINE_AA)
+
+
+def draw_gesture_status(image, gripper_closed, axis):
+    height, width = image.shape[:2]
+    lines = (
+        (f"GRIPPER {'CLOSED' if gripper_closed else 'OPEN'}",
+         PINCH_ACTIVE_COLOR if gripper_closed else (200, 200, 200)),
+        (f"AXIS LOCK: {AXIS_NAMES[axis] if axis is not None else 'NONE'}",
+         PINCH_ACTIVE_COLOR if axis is not None else (200, 200, 200)),
+    )
+    for row, (text, color) in enumerate(lines):
+        cv2.putText(image, text, (width - 230, height - 40 + row * 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+
 def draw_overlay(image, fps, target, grip, tracking, robot_status, orientation=None, clutch=None):
     cv2.rectangle(image, (0, 0), (360, 158 if orientation is None else 210), (30, 30, 30), -1)
 
@@ -282,6 +330,10 @@ def run(args):
         orientation_filter = TargetFilter(np.zeros(3))
         orientation = np.zeros(3)
         clutch = Clutch()
+        pinch = PinchDetector()
+        axis_lock = AxisLock()
+        commanded = BOX_CENTER_MM.copy()
+        gesture = None
         grip = None
         fps = 0.0
         prev_time = time.perf_counter()
@@ -309,8 +361,6 @@ def run(args):
                     offset = arm_to_offset(results.pose_world_landmarks)
                     if offset is not None:
                         target = target_filter.update(offset_to_target(offset))
-                        if robot is not None:
-                            robot.set_goal(target)
                     else:
                         tracking = False
 
@@ -319,16 +369,26 @@ def run(args):
                 if right_hand:
                     grip = grip_value(right_hand)
 
+                height, width = frame.shape[:2]
+                if right_hand:
+                    gesture = pinch.update(right_hand, width, height)
+                else:
+                    pinch.reset()
+                    gesture = None
+                gripper_closed = gesture == "index"
+                lock_axis = GESTURE_AXIS.get(gesture)
+                commanded = axis_lock.update(lock_axis, target, commanded)
+
                 if args.dual_hand and left_hand:
-                    height, width = frame.shape[:2]
                     clutch.update(hand_openness(left_hand, width, height))
                     if not clutch.engaged:
                         angles = hand_to_angles(left_hand, width, height)
                         if angles is not None:
                             orientation = orientation_filter.update(angles_to_offset(angles))
 
-                if args.dual_hand and robot is not None:
-                    robot.set_goal(target, orientation)
+                if robot is not None:
+                    robot.set_gripper(gripper_closed)
+                    robot.set_goal(commanded, orientation if args.dual_hand else None)
 
                 if results.pose_landmarks:
                     draw_arm(image, results.pose_landmarks, tracking)
@@ -339,6 +399,9 @@ def run(args):
                             image, hand, mp_holistic.HAND_CONNECTIONS,
                             mp_styles.get_default_hand_landmarks_style(),
                             mp_styles.get_default_hand_connections_style())
+
+                if right_hand:
+                    draw_pinch(image, right_hand, gesture)
 
                 now = time.perf_counter()
                 dt = now - prev_time
@@ -352,10 +415,11 @@ def run(args):
                         draw_hand_label(image, hand, text)
                 status = "DRY RUN" if robot is None else robot.status
                 if args.dual_hand:
-                    draw_overlay(image, fps, target, grip, tracking, status,
+                    draw_overlay(image, fps, commanded, grip, tracking, status,
                                  orientation, clutch.engaged)
                 else:
-                    draw_overlay(image, fps, target, grip, tracking, status)
+                    draw_overlay(image, fps, commanded, grip, tracking, status)
+                draw_gesture_status(image, gripper_closed, lock_axis)
                 cv2.imshow(WINDOW_NAME, image)
 
                 if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
