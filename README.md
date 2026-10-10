@@ -75,6 +75,20 @@ python3.11 -m venv .venv
 
 See [SIMULATOR.md](SIMULATOR.md) for the simulator and bridge details.
 
+### Right-hand pinch gestures
+
+Touch the thumb tip to a fingertip of the right hand (always active, no flag needed):
+
+| Gesture | Effect |
+| --- | --- |
+| Index + thumb | Gripper closes while pinched, opens on release |
+| Middle + thumb | Arm motion locked to the Z axis |
+| Ring + thumb | Arm motion locked to the X axis |
+
+If several pinches are active, the one that was already active keeps priority; among
+simultaneous ones the tightest wins (ties: index > middle > ring). Thresholds and
+locked axes are constants at the top of `src/pinch.py`.
+
 ## Roadmap
 
 - [x] Define target claim, metrics, and repo setup
