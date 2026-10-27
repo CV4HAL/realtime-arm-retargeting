@@ -153,6 +153,8 @@ class RobotLink:
         from xarm.wrapper import XArmAPI
 
         self.status = "CONNECTING"
+        # SIM-TO-REAL: no change needed, self.ip comes from --ip. On the real arm this opens a
+        # connection to the physical controller, so check the IP twice before running.
         self.arm = XArmAPI(self.ip)
         if not self.arm.connected:
             raise ConnectionError(f"Could not connect to the robot at {self.ip}")
@@ -161,6 +163,11 @@ class RobotLink:
         self.start_servo()
 
     def prepare(self):
+        # SIM-TO-REAL: on the real arm, enable motors only after the safety checklist in
+        # docs/SIM_TO_REAL.md (e-stop in reach, workspace clear). motion_enable(True) below releases the brakes.
+        # SIM-TO-REAL: add reduced mode / TCP speed and boundary here (set_reduced_mode,
+        # set_reduced_max_tcp_speed, set_reduced_tcp_boundary) before the first real run.
+        # How to pick the values: docs/SIM_TO_REAL.md, section 3.
         self.arm.clean_error()
         self.arm.clean_warn()
         self.arm.motion_enable(enable=True)
@@ -169,6 +176,8 @@ class RobotLink:
 
     def go_home(self):
         self.status = "HOMING"
+        # SIM-TO-REAL: this moves the real arm immediately after connecting. Lower HOME_SPEED_DEG_S
+        # for the first real run and make sure the path to the home pose is clear.
         self.arm.move_gohome(speed=HOME_SPEED_DEG_S, wait=True)
         _, pose = self.arm.get_position()
         self.orientation = list(pose[3:6])
@@ -176,6 +185,8 @@ class RobotLink:
                               speed=MOVE_SPEED_MM_S, wait=True)
 
     def start_servo(self):
+        # SIM-TO-REAL: servo mode streams targets straight to the controller with no trajectory planning.
+        # Keep MAX_STEP_MM / MAX_ANGLE_STEP_DEG low for the first real run (see docs/SIM_TO_REAL.md).
         self.arm.set_mode(1)
         self.arm.set_state(0)
         self.status = "SERVO"
@@ -210,6 +221,8 @@ class RobotLink:
             self.orientation_command = limit_step(self.orientation_command, orientation_goal,
                                                   MAX_ANGLE_STEP_DEG)
             angles = wrap_angle(np.asarray(self.orientation) + self.orientation_command)
+            # SIM-TO-REAL: this is the call that moves the real arm (30 Hz by default). The workspace
+            # limit is only the software box (BOX_CENTER_MM +/- BOX_HALF_SIZE_MM); there is no controller-side limit yet.
             code = self.arm.set_servo_cartesian([*self.command, *angles], is_radian=False)
             if code != 0 or self.arm.error_code != 0:
                 self.status = f"ERROR {code}/{self.arm.error_code}"
@@ -223,6 +236,8 @@ class RobotLink:
             time.sleep(max(0.0, next_tick - time.perf_counter()))
 
     def recover(self):
+        # SIM-TO-REAL: this clears errors and re-enables motion automatically. On the real arm that can
+        # resume motion after a collision or e-stop. Consider requiring a manual confirmation instead.
         self.arm.clean_error()
         self.arm.clean_warn()
         self.arm.motion_enable(enable=True)
@@ -236,6 +251,8 @@ class RobotLink:
         if self.arm is None:
             return
         try:
+            # SIM-TO-REAL: set_state(4) is the SDK stop state. It is not a replacement for the
+            # physical e-stop button, which must stay within reach.
             self.arm.set_state(4)
             self.arm.set_mode(0)
             self.arm.set_state(0)
@@ -433,7 +450,11 @@ def run(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="CV4HAL MediaPipe to UFACTORY Lite 6 bridge")
+    # SIM-TO-REAL: Simulator (default). Comment this line out to use the real Lite 6.
     parser.add_argument("--ip", default="127.0.0.1", help="robot or simulator IP")
+    # SIM-TO-REAL: Real Lite 6. Uncomment this line (and comment the one above) to connect to the real arm.
+    # parser.add_argument("--ip", default="192.168.1.XXX", help="robot or simulator IP")  # replace XXX with the Lite 6 IP (docs/SIM_TO_REAL.md, section 1)
+    # SIM-TO-REAL: Alternatively, leave the default alone and pass the IP at run time: ./run.sh sim --ip <lite6-ip>
     parser.add_argument("--camera", type=int, default=0, help="camera index")
     parser.add_argument("--rate", type=float, default=SERVO_RATE_HZ, help="servo rate in Hz")
     parser.add_argument("--dual-hand", action="store_true",
