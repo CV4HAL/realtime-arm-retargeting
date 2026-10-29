@@ -4,15 +4,15 @@ This guide explains how to point the CV bridge (`src/sim_bridge.py`) at the phys
 UFACTORY Lite 6 instead of the Docker simulator, and how to go back. Commands are given
 for both **Linux/macOS** (bash) and **Windows** (PowerShell).
 
-> **Status:** the real arm has not been tested with this pipeline yet. Values that depend on
-> the hardware (arm IP, subnet, speed and workspace limits, tool load) are not in this repo
-> or in the xArm-Python-SDK (v1.18.4, see `requirements.txt`), so each one below says
-> **how to find it** instead of giving a number.
+> **Status (28 Oct 2026):** first session on the physical Lite 6. The laptop reached the arm
+> over a direct Ethernet cable, UFACTORY Studio loaded, and the bridge drove the arm and the
+> suction gripper. See section 7. Speed, workspace and tool load values are still not in this
+> repo or the SDK, so each one below says **how to find it** instead of giving a number.
 
-> **Do not run the bridge on the physical arm yet.** `recover()` currently clears errors
-> (including collision stops) and re-enables motion on its own every 2 s, and the bridge
-> does not set any safety limits on connect. Until both are fixed, only use UFACTORY
-> Studio to jog the real arm.
+> **Fix these before the next live run:** (1) `shutdown()` never turns off the gripper; on
+> 28 Oct the suction kept running after exit until reset was pressed. (2) `recover()`
+> re-enables motion on its own every 2 s. (3) No controller-side speed or workspace limits.
+> Until then, only run with someone at the e-stop and section 3 fully ticked.
 
 ## Command reference
 
@@ -29,30 +29,32 @@ Run all commands from the repository root.
 
 `run.sh` is a bash script, so it doesn't work in PowerShell. On Windows, call the venv's Python directly.
 
+**Windows:** open the repo in VS Code and use a **PowerShell** terminal (`PS C:\...>`), not an
+Ubuntu/WSL tab (`user@LAPTOP:/mnt/c/...$`). WSL has its own network, so pings and robot
+connections from it can fail. The script is `src/sim_bridge.py`; there is no `arm_connect.py`.
+
 ## 1. Prerequisites
 
-- **Network:** laptop and Lite 6 controller on the same network (direct Ethernet cable or a
-  shared switch/router).
-- **Arm IP:** not stored in this repo. Get it from UFACTORY Studio's connection screen or
-  the control box (see `SIMULATOR.md`, "Switching to the physical robot"), from your
-  router's DHCP leases, or by asking whoever set up the arm. Write it down in the team's
-  notes and use it wherever `<lite6-ip>` appears below.
-- **Static IP on the laptop:** look at the arm's IP and subnet mask, then give the laptop's
-  Ethernet interface a fixed address in the same subnet with a different host number
-   This keeps DHCP from changing it mid-session.
+- **Cable:** Ethernet straight from the port on the **back of the control box** to the laptop.
+  No router or switch needed.
+- **Arm IP:** `192.168.0.184` on 28 Oct 2026. Confirm in UFACTORY Studio or on the control box
+  each session. Use it wherever `<lite6-ip>` appears.
+- **Static IP on the laptop:** set the **Ethernet** adapter to `192.168.0.100` (any unused
+  `192.168.0.x` except `.184`). This is a new address, **not your laptop's current IP**: your
+  Wi-Fi IP is on another network and Windows won't save an address already in use.
 
-  **Linux:** `nmcli con mod "<ethernet-connection>" ipv4.method manual ipv4.addresses <laptop-ip>/24`, then `nmcli con up "<ethernet-connection>"`
+  **Linux:** `nmcli con mod "<ethernet-connection>" ipv4.method manual ipv4.addresses 192.168.0.100/24`, then `nmcli con up "<ethernet-connection>"`
 
-  **Windows:** Settings > Network & Internet > Ethernet > IP assignment > Edit > Manual. Turn on IPv4, enter `<laptop-ip>` and subnet mask `255.255.255.0`, leave gateway and DNS empty, and save.
+  **Windows:** Settings > Network & Internet > Ethernet > IP assignment > Edit > Manual. Turn on IPv4, enter `192.168.0.100` and subnet mask `255.255.255.0`, leave gateway and DNS empty, and save.
+
+  "No Internet" / "Sin Internet" on Ethernet afterwards is normal. Wi-Fi can stay on.
 
 - **Verify the connection** before running any code:
   ```bash
       ping -c 3 <lite6-ip>    # Linux / macOS
-      ping <lite6-ip>         # Windows
+      ping <lite6-ip>         # Windows, from PowerShell (not WSL)
   ```
-  and open UFACTORY Studio at `http://<lite6-ip>:18333` (same port the simulator uses,
-  see `SIMULATOR.md`). If it does not load on the real controller, check the address and
-  port shown in the UFACTORY documentation for your controller.
+  and open UFACTORY Studio at `http://<lite6-ip>:18333` (no `< >` brackets). Confirmed working on the real controller on 28 Oct.
 - Python environment ready: `./run.sh check`.
 - Test the vision side without the robot first: `./run.sh sim --dry-run`.
 
@@ -86,7 +88,7 @@ yet, but each matters on the real arm):
 | `sim_bridge.py:188` | `start_servo()` enters servo mode (`set_mode(1)`); step limits are `MAX_STEP_MM` / `MAX_ANGLE_STEP_DEG`. |
 | `sim_bridge.py:224` | `set_servo_cartesian(...)` is the call that moves the arm. |
 | `sim_bridge.py:239` | `recover()` auto-clears errors and re-enables motion. |
-| `sim_bridge.py:254` | `shutdown()` uses `set_state(4)`; it does not replace the physical e-stop. |
+| `sim_bridge.py:254` | `shutdown()` uses `set_state(4)`; it does not replace the physical e-stop.  It never stops the gripper, which is why the suction stayed on on 28 Oct.|
 
 Other references to `127.0.0.1` that are documentation only: `run.sh:45` (help text),
 `README.md:67`, and `SIMULATOR.md`.
@@ -96,6 +98,8 @@ Other references to `127.0.0.1` that are documentation only: `run.sh:45` (help t
 Tick every item before the first real run.
 
 - [ ] A person stands at the e-stop (physical button) and can reach it at all times.
+- [ ] No hands near the arm while it runs. Use a spot with free space on all sides (the 28 Oct
+      setup was cramped).
 - [ ] Workspace is clear: nothing and nobody inside the arm's reach, including the path
       to the home pose.
 - [ ] Reduced speed and acceleration. In the code today: `HOME_SPEED_DEG_S = 30`,
@@ -118,7 +122,9 @@ Tick every item before the first real run.
 - [ ] Correct mode and state. SDK values: mode `0` = position control, mode `1` = servo motion
       (required by `set_servo_cartesian`); state `0` = motion, `3` = pause, `4` = stop. The bridge
       uses mode 0 / state 0 to home, then mode 1 / state 0 to servo.
-- [ ] End effector: no gripper is mounted right now. Set TCP payload to 0 kg and end effector to None in UFACTORY Studio. The right-hand index pinch still sends gripper commands, so avoid it for now.
+- [ ] End effector: set it and the TCP payload in Studio to match what's mounted (suction on
+      28 Oct, pincher planned next). The index pinch fires the gripper, with about a 5 s delay.
+      Know how to turn it off in Studio and where the reset button is.
 
 - [ ] Tool load / collision sensitivity: the bridge does not set them. Weigh the real tool and
       call `set_tcp_load(weight_kg, [x_mm, y_mm, z_mm])`; `set_collision_sensitivity(value)` takes
@@ -136,10 +142,13 @@ Tick every item before the first real run.
    docstring for units). The repo has no such script yet.
 5. With the e-stop person in place, start the bridge: `./run.sh sim --ip <lite6-ip>`.
    The arm will home first (`HOMING`), then enter `SERVO`. Be ready to hit the e-stop.
-6. Move your hand slowly and only a little. Watch the overlay status; anything other than
+6. Face the webcam squarely and move your **whole arm** in slow, large sweeps (the arm follows
+shoulder-to-wrist, not your hand). Don't pinch unless you mean to: pinches lock axes and fire
+the gripper. Watch the overlay status; anything other than
    `SERVO` (for example `ERROR <code>/<code>`) means stop and investigate.
 7. Increase speed and range gradually across sessions, never within the same run.
 8. End with `q` or `Esc` in the video window; `shutdown()` stops the arm and disconnects.
+9. Check the gripper or suction has stopped. If not, turn it off in Studio or press reset.
 
 ## 5. Going back to the simulator
 
@@ -153,6 +162,14 @@ Tick every item before the first real run.
 | Symptom | Things to check |
 |---|---|
 | `ConnectionError: Could not connect to the robot at <ip>` | `ping <lite6-ip>`; laptop static IP is in the same subnet; cable/switch; the IP is correct; Studio loads at `http://<lite6-ip>:18333`. |
+| Windows won't save the Ethernet IP | Address already in use (usually your Wi-Fi IP). Use `192.168.0.100`. |
+| Ping "Destination Host Unreachable" | Ethernet is still on another network. Check `ipconfig` and set the static IP. |
+| Ping from a `172.x.x.x` address | You're in WSL. Use PowerShell or `ping.exe`. |
+| Arm moves much less than the operator | Use whole-arm sweeps; targets are clamped to `BOX_HALF_SIZE_MM`. |
+| Arm freezes along one direction | A pinch is locking an axis. Relax the right hand. |
+| Shaky forward/back motion | MediaPipe depth is noisy. Face the camera, improve front lighting, try `EMA_ALPHA` 0.15. |
+| Wrong direction or big wrist twists | Arm folded or near reach limit. Use more space; try `--swap-hands` if L/R is reversed. |
+| Suction keeps running after exit | Known `shutdown()` bug. Turn it off in Studio or press reset. |
 | Overlay shows `ERROR <code>/<code>` | Read the code in UFACTORY Studio or with `arm.get_err_warn_code(show=True)` and consult the UFACTORY manual. `recover()` retries every `RECOVERY_COOLDOWN_S` = 2 s; stop the run if it keeps failing. |
 | Arm does not move but no error | Motion not enabled, wrong mode/state, or the e-stop is engaged. Check Studio, then `prepare()` / `start_servo()` order. |
 | Arm stops after a collision or e-stop | Release the e-stop, clear the error in Studio, restart the bridge. Avoid relying on `recover()` for this. |
@@ -160,3 +177,10 @@ Tick every item before the first real run.
 | Works in the simulator, differs on the arm | The simulator does not model collisions, payload or controller limits; add the differences you find during the first tests to this table. |
 | `./run.sh` fails on Windows | `run.sh` is bash only. Use the PowerShell commands in the command reference. |
 | Ping fails on Windows | Windows may be routing over Wi-Fi. Turn Wi-Fi off and check the Ethernet adapter has the static IP. |
+
+
+## 7. Session log
+
+| Date | Result |
+|---|---|
+| 28 Oct 2026 | Connected over direct Ethernet (ping 4/4, 0 to 2 ms); Studio loaded. Bridge drove the arm but range was small and the cell was cramped. Suction worked with about 5 s delay and stayed on after exit until reset. |
