@@ -1,13 +1,33 @@
 # Switching from the Lite 6 simulator to the real arm
 
 This guide explains how to point the CV bridge (`src/sim_bridge.py`) at the physical
-UFACTORY Lite 6 instead of the Docker simulator, and how to go back. It documents the
-current code; no control logic changes are needed to follow it.
+UFACTORY Lite 6 instead of the Docker simulator, and how to go back. Commands are given
+for both **Linux/macOS** (bash) and **Windows** (PowerShell).
 
 > **Status:** the real arm has not been tested with this pipeline yet. Values that depend on
 > the hardware (arm IP, subnet, speed and workspace limits, tool load) are not in this repo
 > or in the xArm-Python-SDK (v1.18.4, see `requirements.txt`), so each one below says
 > **how to find it** instead of giving a number.
+
+> **Do not run the bridge on the physical arm yet.** `recover()` currently clears errors
+> (including collision stops) and re-enables motion on its own every 2 s, and the bridge
+> does not set any safety limits on connect. Until both are fixed, only use UFACTORY
+> Studio to jog the real arm.
+
+## Command reference
+
+Run all commands from the repository root.
+
+| Task | Linux / macOS (bash) | Windows (PowerShell) |
+|---|---|---|
+| Check environment | `./run.sh check` | `.venv\Scripts\python src\check_setup.py` |
+| Vision only (no robot) | `./run.sh sim --dry-run` | `.venv\Scripts\python src\sim_bridge.py --dry-run` |
+| Bridge to simulator | `./run.sh sim` | `.venv\Scripts\python src\sim_bridge.py --ip 127.0.0.1` |
+| Bridge to real arm | `./run.sh sim --ip <lite6-ip>` | `.venv\Scripts\python src\sim_bridge.py --ip <lite6-ip>` |
+| Ping the arm | `ping -c 3 <lite6-ip>` | `ping <lite6-ip>` |
+| Stop simulator | `./run.sh sim-down` | `docker stop uf_software` |
+
+`run.sh` is a bash script, so it doesn't work in PowerShell. On Windows, call the venv's Python directly.
 
 ## 1. Prerequisites
 
@@ -19,12 +39,16 @@ current code; no control logic changes are needed to follow it.
   notes and use it wherever `<lite6-ip>` appears below.
 - **Static IP on the laptop:** look at the arm's IP and subnet mask, then give the laptop's
   Ethernet interface a fixed address in the same subnet with a different host number
-  (for example with NetworkManager: `nmcli con mod <ethernet-connection> ipv4.method manual
-  ipv4.addresses <laptop-ip>/<prefix>`, then reconnect). This keeps DHCP from changing it
-  mid-session.
+   This keeps DHCP from changing it mid-session.
+
+  **Linux:** `nmcli con mod "<ethernet-connection>" ipv4.method manual ipv4.addresses <laptop-ip>/24`, then `nmcli con up "<ethernet-connection>"`
+
+  **Windows:** Settings > Network & Internet > Ethernet > IP assignment > Edit > Manual. Turn on IPv4, enter `<laptop-ip>` and subnet mask `255.255.255.0`, leave gateway and DNS empty, and save.
+
 - **Verify the connection** before running any code:
   ```bash
-  ping -c 3 <lite6-ip>
+      ping -c 3 <lite6-ip>    # Linux / macOS
+      ping <lite6-ip>         # Windows
   ```
   and open UFACTORY Studio at `http://<lite6-ip>:18333` (same port the simulator uses,
   see `SIMULATOR.md`). If it does not load on the real controller, check the address and
@@ -32,25 +56,19 @@ current code; no control logic changes are needed to follow it.
 - Python environment ready: `./run.sh check`.
 - Test the vision side without the robot first: `./run.sh sim --dry-run`.
 
-## 2. What to change in the code
+## 2. How to point the bridge at the real arm
 
-There is a single place: the default of `--ip`.
-
-| Where | What |
-|---|---|
-| `src/sim_bridge.py:453-457` (`parse_args`) | Simulator line is active; the real-arm line is commented out right below it. Swap which one is commented. |
-
-```python
-# SIM-TO-REAL: Simulator (default). Comment this line out to use the real Lite 6.
-parser.add_argument("--ip", default="127.0.0.1", help="robot or simulator IP")
-# SIM-TO-REAL: Real Lite 6. Uncomment this line (and comment the one above) ...
-# parser.add_argument("--ip", default="192.168.1.XXX", ...)  # replace XXX with the Lite 6 IP (section 1)
-```
-
-You can also avoid editing code entirely and pass the IP on the command line:
+Pass the arm's IP on the command line. Don't change the default `--ip` in the code: if that change gets committed, everyone's simulator runs will try to reach the real arm.
 
 ```bash
+# Linux / macOS
 ./run.sh sim --ip <lite6-ip>
+```
+
+```powershell
+
+# Windows
+.venv\Scripts\python src\sim_bridge.py --ip <lite6-ip>
 ```
 
 The IP flows `args.ip` (`sim_bridge.py:337`) -> `RobotLink.__init__` -> `XArmAPI(self.ip)`
@@ -100,8 +118,8 @@ Tick every item before the first real run.
 - [ ] Correct mode and state. SDK values: mode `0` = position control, mode `1` = servo motion
       (required by `set_servo_cartesian`); state `0` = motion, `3` = pause, `4` = stop. The bridge
       uses mode 0 / state 0 to home, then mode 1 / state 0 to servo.
-- [ ] Gripper: it opens/closes on the right-hand index pinch. Keep fingers clear, and test open/close once
-      with nothing in the gripper's path before the first run.
+- [ ] End effector: no gripper is mounted right now. Set TCP payload to 0 kg and end effector to None in UFACTORY Studio. The right-hand index pinch still sends gripper commands, so avoid it for now.
+
 - [ ] Tool load / collision sensitivity: the bridge does not set them. Weigh the real tool and
       call `set_tcp_load(weight_kg, [x_mm, y_mm, z_mm])`; `set_collision_sensitivity(value)` takes
       `0` to `5` (see the SDK docstrings in `xarm/wrapper/xarm_api.py`).
@@ -140,3 +158,5 @@ Tick every item before the first real run.
 | Arm stops after a collision or e-stop | Release the e-stop, clear the error in Studio, restart the bridge. Avoid relying on `recover()` for this. |
 | Jittery or too-fast motion | Lower `MAX_STEP_MM`, `MAX_ANGLE_STEP_DEG` and `EMA_ALPHA`/rate; improve lighting for tracking. |
 | Works in the simulator, differs on the arm | The simulator does not model collisions, payload or controller limits; add the differences you find during the first tests to this table. |
+| `./run.sh` fails on Windows | `run.sh` is bash only. Use the PowerShell commands in the command reference. |
+| Ping fails on Windows | Windows may be routing over Wi-Fi. Turn Wi-Fi off and check the Ethernet adapter has the static IP. |
