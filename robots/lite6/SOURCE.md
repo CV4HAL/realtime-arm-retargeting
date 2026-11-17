@@ -1,8 +1,9 @@
 # Robot description source: UFACTORY Lite 6
 
 This folder contains the URDF and meshes of the UFACTORY Lite 6 used by the
-collision-safety layer. The files are third-party and **must not be edited by
-hand**. To update them, re-download from the source below and update this file.
+collision-safety layer. The files are third-party. Do not edit them by hand
+without recording the change under **Modifications** below. To update them,
+re-download from the source, re-apply the modifications and update this file.
 
 ## Provenance
 
@@ -17,9 +18,9 @@ hand**. To update them, re-download from the source below and update this file.
 
 ## Verification (2026-11-16)
 
-- `lite6.urdf`: identical to the direct source except line endings
-  (normalized to LF by `.gitattributes`).
-- Joint origins, axes and limits of `joint1`–`joint6` and `joint_eef` match a
+- `lite6.urdf` (before the modifications below): identical to the direct
+  source except line endings (normalized to LF by `.gitattributes`).
+- Joint origins, axes and limits of `joint1`–`joint6` and `joint_eef` matched a
   URDF generated from the upstream xacro at the commit above.
 - Robot meshes `visual/base.stl` and `visual/link1.stl`–`visual/link6.stl` are
   byte-identical to upstream `xarm_description/meshes/lite6/visual/`.
@@ -28,7 +29,41 @@ hand**. To update them, re-download from the source below and update this file.
 - `visual/gripper_lite.stl` and `visual/vacuum_gripper_lite.stl` come from the
   direct source and are **not referenced** by `lite6.urdf`.
 
-### SHA-1 checksums
+## Modifications
+
+### 2026-11-17: joint origins aligned to the controller kinematics
+
+**Why.** The controller computes kinematics with the Modified DH parameters in
+the Lite 6 user manual (Appendix 7). The upstream URDF uses slightly different
+link lengths and rounds pi, so its forward kinematics differed from the
+controller's by up to 1.35 mm (measured in 20 configurations against the
+simulator, firmware v2.4.0) with a 1.41 mm analytic bound. The collision layer
+must predict link positions for the joint angles the controller will use, so
+the model was aligned to the controller.
+
+| Joint | Field | Before | After | Manual DH |
+|---|---|---|---|---|
+| `joint1` | origin xyz z | 0.2435 | 0.2433 | d1 = 243.3 mm |
+| `joint3` | origin xyz x | 0.2002 | 0.2 | a2 = 200 mm |
+| `joint4` | origin xyz y | -0.22761 | -0.2276 | d4 = 227.6 mm |
+| `joint6` | origin xyz y | 0.0625 | 0.0615 | d6 = 61.5 mm |
+| `joint2`–`joint6` | origin rpy | 1.5708 / 3.1416 | pi/2 / pi to full double precision | — |
+
+Meshes are unchanged; they follow their link frames, so they shift by at most
+1 mm relative to each other, which is negligible for collision checking.
+
+**Verification.**
+- Offline: forward kinematics of the modified URDF vs. the manual DH table over
+  2000 random configurations: max error 0.000000 mm (was 1.41 mm).
+- Against the controller: `tests/test_fk_simulator.py` (tolerance 0.05 mm,
+  0.01 deg).
+
+| File | SHA-1 |
+|---|---|
+| `lite6.urdf` direct source (original) | `2b357c21d5f11e9e7ed8e9070a8322e5a8f7ef58` |
+| `lite6.urdf` after this modification | `36d6bb4480d7fc670c8ed709af051d9c53ebb011` |
+
+### SHA-1 checksums (meshes)
 
 ```
 be109ae0a2195bb2544325ade5a94dc74ae484af  visual/base.stl

@@ -32,10 +32,12 @@ pytestmark = pytest.mark.skipif(not SIM_IP, reason="set XARM_SIM_IP to run again
 
 LITE6_YAML = Path(__file__).resolve().parent.parent / "robots" / "lite6" / "robot.yaml"
 
-# The URDF and the manual's DH table already differ by up to ~1 mm (d1, d6),
-# so the tolerance leaves room for that. Tighten it once you know the real error.
-POS_TOL_MM = 2.0
-ROT_TOL_DEG = 0.5
+# lite6.urdf is aligned to the manual's DH table, which is what the controller
+# uses (see robots/lite6/SOURCE.md). Model and controller must agree almost
+# exactly; these tolerances only absorb float rounding in the SDK.
+# Before the alignment the error was up to 1.35 mm (1.41 mm analytic bound).
+POS_TOL_MM = 0.05
+ROT_TOL_DEG = 0.01
 N_CONFIGS = 20
 
 
@@ -99,5 +101,6 @@ def test_flange_matches_controller(model, arm, q):
 
     pos_err_mm = 1000.0 * np.linalg.norm(ours[:3, 3] - expected[:3, 3])
     rot_err_deg = rotation_error_deg(ours[:3, :3], expected[:3, :3])
+    print(f"\n  pos_err_mm={pos_err_mm:.3f}  rot_err_deg={rot_err_deg:.4f}")
     assert pos_err_mm < POS_TOL_MM, f"position error {pos_err_mm:.2f} mm (controller {pose})"
     assert rot_err_deg < ROT_TOL_DEG, f"rotation error {rot_err_deg:.3f} deg (controller {pose})"

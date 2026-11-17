@@ -42,21 +42,20 @@ def random_configs(n, seed=0):
 # --------------------------------------------------------------------------- #
 def test_flange_at_zero(model):
     flange = model.flange_pose(Q_ZERO)
-    np.testing.assert_allclose(flange[:3, 3], [0.087, 0.0, 0.15359], atol=TOL_M)
-    # The flange z axis points straight down at q = 0. The URDF rounds pi/2 to
-    # 1.5708 and pi to 3.1416, which tilts it by ~7e-6 rad (2 um at 0.3 m): hence 1e-4.
-    np.testing.assert_allclose(flange[:3, 2], [0.0, 0.0, -1.0], atol=1e-4)
+    np.testing.assert_allclose(flange[:3, 3], [0.087, 0.0, 0.1542], atol=TOL_M)
+    # The flange z axis points straight down at q = 0 (the URDF writes pi exactly).
+    np.testing.assert_allclose(flange[:3, 2], [0.0, 0.0, -1.0], atol=1e-9)
 
 
 def test_tcp_at_zero(model):
-    np.testing.assert_allclose(model.tcp_pose(Q_ZERO)[:3, 3], [0.087, 0.0, 0.06999], atol=TOL_M)
+    np.testing.assert_allclose(model.tcp_pose(Q_ZERO)[:3, 3], [0.087, 0.0, 0.0706], atol=TOL_M)
 
 
 def test_tool_mesh_spans_flange_to_tcp_at_zero(model):
-    """The gripper must hang from the flange (z = 153.59 mm) down to the TCP (z = 69.99 mm)."""
+    """The gripper must hang from the flange (z = 154.2 mm) down to the TCP (z = 70.6 mm)."""
     tool = model.collision_meshes()[TOOL_LINK][0].copy()
     tool.apply_transform(model.link_poses(Q_ZERO)[TOOL_LINK])
-    np.testing.assert_allclose(tool.bounds[:, 2], [0.06999, 0.15359], atol=TOL_M)
+    np.testing.assert_allclose(tool.bounds[:, 2], [0.0706, 0.1542], atol=TOL_M)
 
 
 # --------------------------------------------------------------------------- #
