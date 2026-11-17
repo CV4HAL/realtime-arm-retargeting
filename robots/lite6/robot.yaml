@@ -1,0 +1,32 @@
+# Configuración del robot: todo lo que cambia si cambias de ROBOT o de HERRAMIENTA.
+
+name: ufactory_lite6
+source: SOURCE.md
+
+description:
+  urdf: lite6.urdf
+  base_link: link_base        # base
+  tip_link: link_eef          # brida
+
+joints:
+  - {urdf: joint1, sign: 1, offset_deg: 0}
+  - {urdf: joint2, sign: 1, offset_deg: 0}
+  - {urdf: joint3, sign: 1, offset_deg: 0}
+  - {urdf: joint4, sign: 1, offset_deg: 0}
+  - {urdf: joint5, sign: 1, offset_deg: 0}
+  - {urdf: joint6, sign: 1, offset_deg: 0}
+
+tool:
+  name: lite_gripper
+  parent_link: link_eef
+  mesh: visual/gripper_lite.stl
+  origin: {xyz_m: [0.0, 0.0, 0.0], rpy_deg: [0.0, 0.0, 0.0]}   
+  tcp:    {xyz_m: [0.0, 0.0, 0.0836], rpy_deg: [0.0, 0.0, 0.0]}
+
+driver:
+  type: xarm
+  hw_safety:
+    self_collision: true
+    tool_collision_model: 7   # set_collision_tool_model: 7 = Lite Gripper (SDK xArm-Python-SDK v1.18.4)
+
+acm: acm.yaml                 # PENDIENTE: generar con muestreo (hoy el archivo está vacío)
