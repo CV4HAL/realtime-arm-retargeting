@@ -1,0 +1,11 @@
+# Normalize line endings so files hash identically on Windows and Linux (CI).
+*.urdf text eol=lf
+*.srdf text eol=lf
+*.xacro text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# Meshes are binary: never convert line endings or diff them as text.
+*.stl binary
+*.STL binary
+*.dae binary
